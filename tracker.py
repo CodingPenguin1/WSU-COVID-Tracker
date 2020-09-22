@@ -34,6 +34,9 @@ def generate_plot(dataframe):
         ax1.plot(dates, datasets[i], c=colors[i], label=dataset_labels[i], linestyle='-')
 
     # plt.xticks([dates[i] for i in range(0, len(dates) + 1, len(dates) // 4)])
+    cleaned_dates = []
+    [cleaned_dates.append(x) for x in dates if x not in cleaned_dates] 
+    dates = cleaned_dates.copy()
     plt.xticks([dates[i] for i in range(0, len(dates), len(dates) // 4)])
     plt.legend(loc='upper left')
     plt.title('Wright State University COVID-19 Cases')
