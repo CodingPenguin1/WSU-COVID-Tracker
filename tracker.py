@@ -15,15 +15,24 @@ from bs4 import BeautifulSoup
 
 
 def generate_plot(dataframe):
+    def convert_to_active_cases(weeks):
+        # Active cases are the sum of confirmed and self-reported cases across both campuses for the current week plus the previous two weeks.
+        active_cases = []
+        for i in range(2, len(weeks)):
+            active_cases.append(weeks[i] + weeks[i - 1] + weeks[i - 2])
+        return active_cases
+
     colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
 
     datasets = []
-    datasets.append(list(dataframe['dayton_students']))
-    datasets.append(list(dataframe['dayton_employees']))
-    datasets.append(list(dataframe['lake_students']))
-    datasets.append(list(dataframe['lake_employees']))
+    # datasets.append(list(dataframe['dayton_students']))
+    datasets.append(convert_to_active_cases(dataframe['dayton_students']))
+    datasets.append(convert_to_active_cases(dataframe['dayton_employees']))
+    datasets.append(convert_to_active_cases(dataframe['lake_students']))
+    datasets.append(convert_to_active_cases(dataframe['lake_employees']))
 
-    dates = list(dataframe['date'])
+    dates = list(dataframe['date'])[2:]
+
     dataset_labels = ['Dayton Students', 'Dayton Employees', 'Lake Students', 'Lake Employees']
 
     fig = plt.figure()
@@ -35,11 +44,11 @@ def generate_plot(dataframe):
 
     # plt.xticks([dates[i] for i in range(0, len(dates) + 1, len(dates) // 4)])
     cleaned_dates = []
-    [cleaned_dates.append(x) for x in dates if x not in cleaned_dates] 
+    [cleaned_dates.append(x) for x in dates if x not in cleaned_dates]
     dates = cleaned_dates.copy()
     plt.xticks([dates[i] for i in range(0, len(dates), len(dates) // 4)])
     plt.legend(loc='upper left')
-    plt.title('Wright State University COVID-19 Cases')
+    plt.title('Active Wright State University COVID-19 Cases')
 
     plt.savefig('plot.png')
 
@@ -82,45 +91,51 @@ def send_emails():
     server.close()
 
 
+def format_date(date):
+    months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+    month_day = date[:date.find('–')]
+    month = months.index(month_day[:month_day.find(' ')]) + 1
+    day = month_day[-2:].strip()
+    year = date[date.rfind(', ') + 1:].strip()
+
+    return f'{day}-{month}-{year}'
+
+
 if __name__ == '__main__':
     page = urllib.request.urlopen('https://www.wright.edu/coronavirus/covid-19-dashboard')
     soup = BeautifulSoup(page, features='html.parser')
     # print(soup.prettify())
 
-    # Parse table
+    # Parse tables
     tables = soup.find_all('table', attrs={'cellpadding': '1', 'cellspacing': '1'})
-    tables_data = []
-    for table in tables:
-        data = []
+    columns = ['date', 'dayton_students', 'dayton_employees', 'lake_students', 'lake_employees']
+    data = []
+    for table_num, table in enumerate(tables):
         table_body = table.find('tbody')
 
         rows = table_body.find_all('tr')
         for row in rows:
             cols = row.find_all('td')
-            cols = [ele.text.strip() for ele in cols]
-            data.append([ele for ele in cols if ele])  # Get rid of empty values
+            if str(cols[0]) != '<td><strong>Totals</strong></td>':
+                date = format_date(str(cols[0]).strip('</td>\np'))
+                # Check if date not in data
+                if not any(date in i for i in data):
+                    # If so, make new row
+                    data.append([date, 0, 0, 0, 0])
 
-        tables_data.append(data)
+                # Append data
+                for i in range(len(data)):
+                    if data[i][0] == date:
+                        confirmed = int(str(cols[1]).replace('strong>', '').strip('<>/td'))
+                        self_reported = int(str(cols[2]).replace('strong>', '').strip('<>/td'))
+                        data[i][table_num + 1] = confirmed + self_reported
+    data.reverse()
 
-    current_data = {'date': str(datetime.today().strftime('%d-%m-%Y')),
-                    'dayton_students': int(tables_data[0][0][-1]),
-                    'dayton_employees': int(tables_data[1][0][-1]),
-                    'lake_students': int(tables_data[2][0][-1]),
-                    'lake_employees': int(tables_data[3][0][-1])}
+    dataframe = pd.DataFrame(data, columns=columns)
+    dataframe.to_csv('cases.csv', index=False)
 
-    try:
-        # Append today's data
-        cases_df = pd.read_csv('cases.csv')
-        cases_df = cases_df.append(current_data, ignore_index=True)
-        cases_df.to_csv('cases.csv', index=False)
-    except FileNotFoundError:
-        # Initial write
-        for key in current_data.keys():
-            current_data[key] = [current_data[key]]
-        cases_df = pd.DataFrame(current_data)
-        cases_df.to_csv('cases.csv', index=False)
-
-    generate_plot(cases_df)
+    generate_plot(dataframe)
 
     # Send emails
     send_emails()
